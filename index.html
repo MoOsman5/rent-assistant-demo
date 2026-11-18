@@ -383,9 +383,15 @@ if (IN_ARTIFACT){
 } else if (MODE === "github"){
   document.getElementById("privacy").hidden = false;
   /* The link you send carries the key after #k= ; it is kept in this browser and removed from the address bar. */
-  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
-  if (h.get("m")) pickedModel = h.get("m");
-  if (h.get("k")){ saveKey(h.get("k")); try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
+  const readLink = () => {
+    const raw = location.hash.replace(/^#/, "");
+    const pick = name => { const m = raw.match(new RegExp("(?:^|&)" + name + "=([^&]*)")); return m ? decodeURIComponent(m[1]) : ""; };
+    if (pick("m")) pickedModel = pick("m");
+    if (pick("k")){ saveKey(pick("k")); document.getElementById("code-field").hidden = true;
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {} }
+  };
+  readLink();
+  window.addEventListener("hashchange", readLink);   /* a new link pasted into the same tab does not reload the page */
   if (!savedKey()){
     document.getElementById("code-label").textContent = "مفتاح التجربة";
     document.getElementById("code-hint").textContent = "(يُحفظ في متصفحك فقط)";
@@ -419,7 +425,11 @@ async function gemini(prompt, signal){
         return {text, truncated: c.finishReason === "MAX_TOKENS"};
       }
       if (r.status === 429) throw fail("الحد المجاني استُهلك مؤقتًا. انتظر دقيقة وجرّب مرة أخرى.");
-      if (r.status === 401 || r.status === 403) throw fail("المفتاح غير صحيح، أو غير مسموح له بالعمل من هذا الموقع.");
+      if (r.status === 401 || r.status === 403){
+        const why = (j.error && j.error.message) ? String(j.error.message) : "";
+        if (/free tier is not available/i.test(why)) throw fail("المفتاح سليم، لكن Google لا تتيح الباقة المجانية للمشروع التابع له. استخدم مفتاحًا من مشروع آخر.");
+        throw fail("المفتاح مرفوض (رمز " + r.status + ")." + (why ? " رسالة Google: " + why.slice(0, 200) : ""));
+      }
       if (r.status === 400 && /API key/i.test(JSON.stringify(j))) throw fail("المفتاح غير صحيح.");
       if (r.status === 404) break;          /* this model name is not available: try the next */
       if (r.status === 400 && cfg.responseMimeType) continue;  /* retry without the JSON setting */
