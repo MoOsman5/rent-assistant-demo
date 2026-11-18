@@ -191,6 +191,9 @@ textarea:focus-visible,input:focus-visible,button:focus-visible,a:focus-visible{
 </div>
 
 <script>
+/* مفتاح التجربة: الصق المفتاح بين علامتي التنصيص في السطر التالي. اتركه فارغًا لو المفتاح سيأتي من الرابط. */
+const BUILT_IN_KEY = "";
+
 const RULINGS = [
  {id:"10419/66", date:"", topic:"التكليف بالوفاء", out:"",
   principle:"التكليف بالوفاء شرط لقبول دعوى الإخلاء للتأخير في الأجرة، وغيابه أو بطلانه معناه عدم قبول الدعوى. يجب أن يحدد الأجرة المتأخرة المطلوبة. البطلان من النظام العام: تقضي به المحكمة من تلقاء نفسها، ويجوز التمسك به لأول مرة أمام النقض إذا كان السبب قانونيًا بحتًا.",
@@ -369,7 +372,7 @@ const runBtn = document.getElementById("run"), stopBtn = document.getElementById
 const IN_ARTIFACT = !!(window.claude && window.claude.use);
 let sample = null, ctrl = null, memKey = "", pickedModel = "";
 function fail(message){ const e = new Error(message); e.shown = true; return e; }
-function savedKey(){ try { return localStorage.getItem("rent-demo-key") || memKey; } catch (e) { return memKey; } }
+function savedKey(){ if (BUILT_IN_KEY) return BUILT_IN_KEY; try { return localStorage.getItem("rent-demo-key") || memKey; } catch (e) { return memKey; } }
 function saveKey(k){ memKey = k; try { localStorage.setItem("rent-demo-key", k); } catch (e) {} }
 
 if (IN_ARTIFACT){
