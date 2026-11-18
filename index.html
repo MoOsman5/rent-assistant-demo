@@ -441,11 +441,13 @@ async function gemini(prompt, signal){
 
 /* OpenRouter keys start with sk-or- : use its free models, found at run time so a retired model name never breaks the page. */
 async function freeModels(signal){
-  const prefer = [/deepseek/i, /qwen/i, /llama-4|llama-3\.3/i, /gemma/i, /mistral/i, /gpt-oss/i];
+  /* tested Nov 2026: nemotron ultra writes good Arabic legal JSON; tiny or coding-only models are skipped */
+  const prefer = [/nemotron-3-ultra/i, /deepseek/i, /qwen3|qwen-3/i, /dots/i, /nemotron-3\.5-super/i, /gemma-4-31b/i, /ernie/i, /llama-4/i, /gpt-oss/i];
+  const skip = /1\.7b|nano|mini-code|lightning|inkling|particle|flint/i;
   try {
     const r = await fetch("https://openrouter.ai/api/v1/models", {signal});
     const j = await r.json();
-    const ids = (j.data || []).filter(m => /:free$/.test(m.id) && (m.context_length || 0) >= 16000).map(m => m.id);
+    const ids = (j.data || []).filter(m => /:free$/.test(m.id) && (m.context_length || 0) >= 16000).map(m => m.id).filter(id => !skip.test(id));
     const score = id => { const i = prefer.findIndex(p => p.test(id)); return i < 0 ? 99 : i; };
     return ids.sort((a, b) => score(a) - score(b));
   } catch (e) { return []; }
@@ -458,14 +460,23 @@ async function openrouter(prompt, signal){
   let last = "";
   for (const model of list){
     statusEl.textContent = "جارٍ التحليل… (" + model.replace(/:free$/, "") + ")";
-    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST", signal,
+    const ac = new AbortController(), stopIt = () => ac.abort();
+    signal.addEventListener("abort", stopIt);
+    const timer = setTimeout(stopIt, 120000);   /* a stuck free model must not hang the page */
+    let r;
+    try { r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST", signal: ac.signal,
       headers: {"content-type": "application/json", "authorization": "Bearer " + key,
                 "HTTP-Referer": location.origin, "X-Title": "Rent case assistant demo"},
-      body: JSON.stringify({model, max_tokens: 6000, temperature: 0.2, messages: [{role: "user", content: prompt}]})
-    });
+      body: JSON.stringify({model, max_tokens: 12000, temperature: 0.2, reasoning: {effort: "low"}, messages: [{role: "user", content: prompt}]})
+    }); } catch (e) {
+      clearTimeout(timer); signal.removeEventListener("abort", stopIt);
+      if (signal.aborted) throw e;
+      last = "انتهت مهلة " + model; continue;
+    }
     let j = {};
     try { j = await r.json(); } catch (e) {}
+    clearTimeout(timer); signal.removeEventListener("abort", stopIt);
     if (r.status === 401) throw fail("مفتاح OpenRouter غير صحيح أو محذوف.");
     if (r.status === 402) throw fail("حساب OpenRouter يحتاج رصيدًا لهذا الموديل.");
     const c = (j.choices || [])[0];
