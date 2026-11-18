@@ -439,13 +439,58 @@ async function gemini(prompt, signal){
   throw fail("تعذّر الوصول إلى الموديل (رمز " + last + "). جرّب بعد قليل.");
 }
 
+/* OpenRouter keys start with sk-or- : use its free models, found at run time so a retired model name never breaks the page. */
+async function freeModels(signal){
+  const prefer = [/deepseek/i, /qwen/i, /llama-4|llama-3\.3/i, /gemma/i, /mistral/i, /gpt-oss/i];
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/models", {signal});
+    const j = await r.json();
+    const ids = (j.data || []).filter(m => /:free$/.test(m.id) && (m.context_length || 0) >= 16000).map(m => m.id);
+    const score = id => { const i = prefer.findIndex(p => p.test(id)); return i < 0 ? 99 : i; };
+    return ids.sort((a, b) => score(a) - score(b));
+  } catch (e) { return []; }
+}
+async function openrouter(prompt, signal){
+  const key = savedKey();
+  statusEl.textContent = "جارٍ اختيار موديل مجاني…";
+  const list = [pickedModel, ...(await freeModels(signal))].filter(Boolean).slice(0, 6);
+  if (!list.length) throw fail("تعذّر الوصول إلى قائمة الموديلات المجانية. جرّب بعد قليل.");
+  let last = "";
+  for (const model of list){
+    statusEl.textContent = "جارٍ التحليل… (" + model.replace(/:free$/, "") + ")";
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST", signal,
+      headers: {"content-type": "application/json", "authorization": "Bearer " + key,
+                "HTTP-Referer": location.origin, "X-Title": "Rent case assistant demo"},
+      body: JSON.stringify({model, max_tokens: 6000, temperature: 0.2, messages: [{role: "user", content: prompt}]})
+    });
+    let j = {};
+    try { j = await r.json(); } catch (e) {}
+    if (r.status === 401) throw fail("مفتاح OpenRouter غير صحيح أو محذوف.");
+    if (r.status === 402) throw fail("حساب OpenRouter يحتاج رصيدًا لهذا الموديل.");
+    const c = (j.choices || [])[0];
+    const text = c && c.message ? String(c.message.content || "") : "";
+    if (r.ok && text.trim()) return {text, truncated: c.finish_reason === "length"};
+    last = (j.error && j.error.message) ? String(j.error.message) : ("رمز " + r.status);
+    if (r.status === 429 && /per-day|daily/i.test(last)) throw fail("الحد اليومي المجاني (50 تحليلًا) انتهى. جرّب غدًا.");
+    /* busy, removed or empty: try the next free model */
+  }
+  throw fail("كل الموديلات المجانية مشغولة الآن. جرّب بعد دقيقة. (" + last.slice(0, 150) + ")");
+}
+
 async function ask(facts, side, signal){
   if (IN_ARTIFACT){
     const res = await sample(buildPrompt(facts, side), {signal, modelTier:"default",
       onText: ({text}) => { statusEl.textContent = "جارٍ كتابة المذكرة… " + text.length + " حرفًا"; }});
     return {text: res.text, truncated: res.truncated};
   }
-  if (MODE === "github") return gemini(buildPrompt(facts, side), signal);
+  if (MODE === "github"){
+    const typed = document.getElementById("code").value.trim();
+    if (typed) saveKey(typed);
+    const key = savedKey();
+    if (!key) throw fail("لا يوجد مفتاح. افتح الصفحة من الرابط الكامل الذي وصلك، أو اكتب المفتاح في خانته.");
+    return /^sk-or-/.test(key) ? openrouter(buildPrompt(facts, side), signal) : gemini(buildPrompt(facts, side), signal);
+  }
   const r = await fetch("/api/analyze", {method:"POST", signal, headers:{"content-type":"application/json"},
     body: JSON.stringify({facts, side, code: document.getElementById("code").value})});
   let j = {};
